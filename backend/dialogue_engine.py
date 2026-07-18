@@ -21,18 +21,32 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-3.5-flash" # modèle rapide du plan gratuit ; ajustable si besoin
+GEMINI_MODEL = "gemini-3.5-flash"
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------
-# VOIX — voix françaises edge-tts, réparties par genre perçu
+# VOIX SIGNATURES — fixes, jamais changeantes.
+# C'est l'identité sonore de l'application.
+#
+#   ALINE — fr-FR-DeniseNeural
+#     Voix féminine : naturelle, chaleureuse, légèrement intense.
+#     Elle reste Aline quel que soit le personnage féminin.
+#
+#   ROGER — fr-FR-HenriNeural
+#     Voix masculine : autoritaire, ancrée, grave.
+#     Réglages "Capitaine Calme" appliqués par dessus pour le rendu séducteur.
+#     Il reste Roger quel que soit le personnage masculin.
 # ---------------------------------------------------------
 
-VOIX_FEMME = ["fr-FR-DeniseNeural", "fr-FR-EloiseNeural", "fr-CA-SylvieNeural"]
-VOIX_HOMME = ["fr-FR-HenriNeural", "fr-CA-JeanNeural", "fr-BE-GerardNeural"]
-VOIX_NEUTRE = ["fr-FR-DeniseNeural", "fr-FR-HenriNeural"]
+VOIX_ALINE = "fr-FR-DeniseNeural"   # signature féminine
+VOIX_ROGER = "fr-FR-HenriNeural"    # signature masculine
+
+# Compatibilité avec le reste du code (attribuer_voix utilise des listes)
+VOIX_FEMME  = [VOIX_ALINE]
+VOIX_HOMME  = [VOIX_ROGER]
+VOIX_NEUTRE = [VOIX_ALINE, VOIX_ROGER]
 
 MOTS_CLES_FEMME = {"elle", "femme", "fille", "elle1", "elle2"}
 MOTS_CLES_HOMME = {"lui", "homme", "garçon", "garcon", "lui1", "lui2"}
