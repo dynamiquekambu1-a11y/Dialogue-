@@ -21,7 +21,13 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-3.5-flash"
+
+# Groq — fallback automatique quand Gemini atteint son quota (429).
+# Compatible OpenAI, pas de carte bancaire, ~14 000 req/jour gratuits.
+# Si GROQ_API_KEY n'est pas définie, le fallback est désactivé silencieusement.
+_GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.3-70b-versatile"   # meilleur modèle gratuit Groq pour la créativité
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
@@ -99,19 +105,12 @@ _GARDE_FOU_LOVE = (
 
 
 # ---------------------------------------------------------
-# 1. GÉNÉRATION DU DIALOGUE PAR L'IA (Gemini)
+# 1. GÉNÉRATION DU DIALOGUE PAR L'IA (Gemini avec fallback Groq)
 # ---------------------------------------------------------
 
-def generer_dialogue_ia(genre: str, duree_secondes: int, nb_personnages: int,
-                         cible: str = "mixte") -> dict:
-    """
-    Génère un dialogue via Gemini.
-    Retourne {"dialogue": [...], "legende_suggeree": "..."}
-    Chaque réplique : {"personnage", "genre" (homme/femme/neutre), "ligne", "ton"}
-    """
-    if genre not in GENRES:
-        raise ValueError(f"Genre inconnu. Choix possibles : {list(GENRES.keys())}")
-
+def _construire_prompt(genre: str, duree_secondes: int,
+                        nb_personnages: int, cible: str) -> tuple[str, str]:
+    """Construit le prompt système et le message utilisateur. Réutilisé par Gemini et Groq."""
     nb_mots_cible = int((duree_secondes / 60) * DEBIT_PAROLE_MOTS_PAR_MIN)
 
     consigne_cible = ""
@@ -147,12 +146,16 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
 {{
   "dialogue": [
     {{"personnage": "Elle", "genre": "femme", "ligne": "...", "ton": "chuchote, paniquée"}},
-    {{"personnage": "Lui", "genre": "homme", "ligne": "...", "ton": "avec un sourire"}}
+    {{"personnage": "Lui", "genre": "homme", "ligne": "...", "ton": "sûr de lui"}}
   ],
   "legende_suggeree": "..."
 }}
 """
+    return prompt_systeme, "Écris le dialogue maintenant."
 
+
+def _generer_via_gemini(prompt_systeme: str, message: str) -> dict:
+    """Génère un dialogue via Gemini."""
     model = genai.GenerativeModel(
         model_name=GEMINI_MODEL,
         system_instruction=prompt_systeme,
@@ -161,8 +164,54 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
             "temperature": 0.9,
         },
     )
-    response = model.generate_content("Écris le dialogue maintenant.")
+    response = model.generate_content(message)
     return json.loads(response.text)
+
+
+def _generer_via_groq(prompt_systeme: str, message: str) -> dict:
+    """Génère un dialogue via Groq (fallback quand Gemini est à court de quota)."""
+    from openai import OpenAI as GroqClient
+    client = GroqClient(
+        api_key=_GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
+    )
+    reponse = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": prompt_systeme},
+            {"role": "user", "content": message},
+        ],
+        temperature=0.9,
+        response_format={"type": "json_object"},
+    )
+    texte = reponse.choices[0].message.content
+    texte = texte.replace("```json", "").replace("```", "").strip()
+    return json.loads(texte)
+
+
+def generer_dialogue_ia(genre: str, duree_secondes: int, nb_personnages: int,
+                         cible: str = "mixte") -> dict:
+    """
+    Génère un dialogue via Gemini. Si Gemini dépasse son quota (erreur 429),
+    bascule automatiquement sur Groq — invisible pour l'utilisateur.
+    """
+    if genre not in GENRES:
+        raise ValueError(f"Genre inconnu. Choix possibles : {list(GENRES.keys())}")
+
+    prompt_systeme, message = _construire_prompt(genre, duree_secondes, nb_personnages, cible)
+
+    # Tentative 1 : Gemini
+    try:
+        return _generer_via_gemini(prompt_systeme, message)
+    except Exception as e:
+        # Si c'est un quota Gemini (429) ET que Groq est configuré → on bascule
+        if "429" in str(e) and _GROQ_API_KEY:
+            pass  # on continue vers Groq
+        else:
+            raise  # autre erreur → on la remonte normalement
+
+    # Tentative 2 : Groq (fallback automatique)
+    return _generer_via_groq(prompt_systeme, message)
 
 
 # ---------------------------------------------------------
