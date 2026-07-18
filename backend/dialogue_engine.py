@@ -21,7 +21,7 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-3-flash"# modèle rapide du plan gratuit ; ajustable si besoin
+GEMINI_MODEL = "gemini-3.5-flash"# modèle rapide du plan gratuit ; ajustable si besoin
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
