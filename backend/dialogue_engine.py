@@ -27,7 +27,35 @@ GEMINI_MODEL = "gemini-3.5-flash"
 # Compatible OpenAI, pas de carte bancaire, ~14 000 req/jour gratuits.
 # Si GROQ_API_KEY n'est pas définie, le fallback est désactivé silencieusement.
 _GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.3-70b-versatile"   # meilleur modèle gratuit Groq pour la créativité
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+DOSSIER_AUDIO = Path("audio_generes")
+DOSSIER_AUDIO.mkdir(exist_ok=True)
+
+# ---------------------------------------------------------
+# VOIX SIGNATURES — fixes, identité sonore de l'application.
+#
+#   ALINE — fr-FR-DeniseNeural
+#     Naturelle, chaleureuse, légèrement intense.
+#
+#   ROGER — fr-FR-RemyMultilingualNeural
+#     Voix conversationnelle moderne, fluide et naturelle.
+#     Bien meilleure que Henri pour la drague et le dialogue intime.
+#     Les réglages "Capitaine Calme" sont adoucis pour coller
+#     à un ton poème/séduction plutôt qu'autoritaire.
+# ---------------------------------------------------------
+
+VOIX_ALINE = "fr-FR-DeniseNeural"
+VOIX_ROGER = "fr-FR-RemyMultilingualNeural"
+
+VOIX_FEMME  = [VOIX_ALINE]
+VOIX_HOMME  = [VOIX_ROGER]
+VOIX_NEUTRE = [VOIX_ALINE, VOIX_ROGER]
+
+MOTS_CLES_FEMME = {"elle", "femme", "fille", "elle1", "elle2"}
+MOTS_CLES_HOMME = {"lui", "homme", "garçon", "garcon", "lui1", "lui2"}
+
+DEBIT_PAROLE_MOTS_PAR_MIN = 150
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
@@ -338,13 +366,12 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
     if any(m in ton_lower for m in _MOTS_CONFIANT):
         if genre == "homme":
-            # "Capitaine Calme" : très lent, grave, présent.
-            # -20% débit = chaque mot respire.
-            # -20Hz pitch = voix qui part du ventre.
-            # +12% volume = présence sans crier.
-            return "-20%", "+12%", "-20Hz"
+            # Drague/poème : lent et posé, légèrement grave, pas écrasant.
+            # -15% débit = chaque mot compte, on ne se précipite pas.
+            # -10Hz pitch = voix grave mais pas lourde, juste plus chaude.
+            # +5% volume = présence douce, pas dominante.
+            return "-15%", "+5%", "-10Hz"
         else:
-            # Féminin confiant : légèrement plus posée, voix ancrée
             return "-10%", "+8%", "-8Hz"
 
     if any(m in ton_lower for m in _MOTS_RIT):
@@ -353,10 +380,10 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
     if any(m in ton_lower for m in _MOTS_TRISTE):
         return "-10%", "+0%", "-15Hz"
 
-    # Défaut pour un homme : légèrement ralenti et grave par rapport au neutre
-    # Évite le rendu "lecture à voix haute" même sans indication de ton.
+    # Défaut pour un homme : légèrement ralenti et grave par rapport au neutre.
+    # Remy est déjà naturellement plus doux que Henri — on évite de trop forcer.
     if genre == "homme":
-        return "-5%", "+5%", "-8Hz"
+        return "-5%", "+0%", "-5Hz"
 
     return "+0%", "+0%", "+0Hz"
 
