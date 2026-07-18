@@ -21,7 +21,7 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-3.5-flash" # modèle rapide du plan gratuit ; ajustable si besoin
+GEMINI_MODEL = "gemini-2.5-flash"  # modèle rapide du plan gratuit ; ajustable si besoin
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
@@ -240,37 +240,61 @@ def attribuer_voix(dialogue: list[dict]) -> dict:
 #    on approxime donc l'émotion via débit/volume/hauteur de voix)
 # ---------------------------------------------------------
 
-_MOTS_CHUCHOTE = {"chuchote", "murmure", "bas", "doucement", "à voix basse"}
+_MOTS_CHUCHOTE = {"chuchote", "murmure", "bas", "doucement", "à voix basse", "souffle"}
 _MOTS_CRIE = {"crie", "hurle", "fort", "colère", "énervé", "en colère"}
+
+# "La Voix du Capitaine Calme" : bas, posé, stable, intentionnel.
+# Chaque mot a du poids. On ne convainc pas — on constate.
 _MOTS_CONFIANT = {
     "sûr de lui", "sourire en coin", "confiant", "dominant", "assuré",
     "arrogant", "posé", "déterminé", "ferme", "autoritaire", "calme et sûr",
+    "séducteur", "séduisant", "regard direct", "imperturbable", "tranquille",
+    "murmure séducteur", "voix grave", "calme absolu",
 }
+
 _MOTS_RIT = {"rit", "amusé", "joyeux", "en riant", "éclate de rire"}
 _MOTS_TRISTE = {"triste", "pleure", "déçu", "abattu"}
 
 
-def _ton_vers_prosodie(ton: str) -> tuple[str, str, str]:
-    """Retourne (rate, volume, pitch) au format attendu par edge-tts, ex: ('+10%', '-20%', '+5Hz').
+def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
+    """Retourne (rate, volume, pitch) au format attendu par edge-tts.
 
-    L'ordre des tests compte : "confiant" est vérifié avant "rit", pour qu'une
-    indication comme "sourire en coin" (smirk assuré) ne soit pas confondue
-    avec "rit" (rire léger) — les deux appellent des voix très différentes.
+    Pour un personnage masculin avec ton confiant/dominant, on applique
+    la "Voix du Capitaine Calme" : débit très ralenti, pitch grave, volume
+    ferme. C'est un profil vocal différent de la version féminine confiante.
     """
     ton_lower = (ton or "").lower()
 
     if any(m in ton_lower for m in _MOTS_CHUCHOTE):
-        return "-10%", "-30%", "+0Hz"
+        # Chuchoter : lent, très doux, neutre en pitch
+        return "-15%", "-35%", "+0Hz"
+
     if any(m in ton_lower for m in _MOTS_CRIE):
-        return "+10%", "+20%", "+20Hz"
+        # Crier : rapide, fort, aigu
+        return "+15%", "+25%", "+20Hz"
+
     if any(m in ton_lower for m in _MOTS_CONFIANT):
-        # Débit ralenti et légèrement posé, voix plus grave, volume ferme :
-        # rendu direct et assuré plutôt que "lu" ou hésitant.
-        return "-8%", "+8%", "-10Hz"
+        if genre == "homme":
+            # "Capitaine Calme" : très lent, grave, présent.
+            # -20% débit = chaque mot respire.
+            # -20Hz pitch = voix qui part du ventre.
+            # +12% volume = présence sans crier.
+            return "-20%", "+12%", "-20Hz"
+        else:
+            # Féminin confiant : légèrement plus posée, voix ancrée
+            return "-10%", "+8%", "-8Hz"
+
     if any(m in ton_lower for m in _MOTS_RIT):
         return "+5%", "+0%", "+15Hz"
+
     if any(m in ton_lower for m in _MOTS_TRISTE):
         return "-10%", "+0%", "-15Hz"
+
+    # Défaut pour un homme : légèrement ralenti et grave par rapport au neutre
+    # Évite le rendu "lecture à voix haute" même sans indication de ton.
+    if genre == "homme":
+        return "-5%", "+5%", "-8Hz"
+
     return "+0%", "+0%", "+0Hz"
 
 
@@ -278,8 +302,9 @@ def _ton_vers_prosodie(ton: str) -> tuple[str, str, str]:
 # 5. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
 # ---------------------------------------------------------
 
-async def _generer_audio_ligne(texte: str, voix: str, ton: str = "") -> AudioSegment:
-    rate, volume, pitch = _ton_vers_prosodie(ton)
+async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
+                               genre: str = "neutre") -> AudioSegment:
+    rate, volume, pitch = _ton_vers_prosodie(ton, genre)
     communicate = edge_tts.Communicate(texte, voix, rate=rate, volume=volume, pitch=pitch)
 
     audio_bytes = bytearray()
@@ -291,16 +316,25 @@ async def _generer_audio_ligne(texte: str, voix: str, ton: str = "") -> AudioSeg
 
 
 async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
-                                  pause_entre_repliques_ms: int = 350) -> AudioSegment:
+                                  pause_base_ms: int = 350) -> AudioSegment:
     audio_final = AudioSegment.empty()
-    pause = AudioSegment.silent(duration=pause_entre_repliques_ms)
 
     for i, replique in enumerate(dialogue):
         voix = mapping_voix[replique["personnage"]]
-        segment = await _generer_audio_ligne(replique["ligne"], voix, replique.get("ton", ""))
+        genre = replique.get("genre", "neutre")
+        segment = await _generer_audio_ligne(
+            replique["ligne"], voix, replique.get("ton", ""), genre
+        )
         audio_final += segment
+
         if i < len(dialogue) - 1:
-            audio_final += pause
+            # Le silence après une réplique masculine est plus long —
+            # il fait partie du personnage (le poids du mot, le calme qui s'installe).
+            if genre == "homme":
+                pause_ms = pause_base_ms + 250   # 600ms total par défaut
+            else:
+                pause_ms = pause_base_ms          # 350ms pour la femme
+            audio_final += AudioSegment.silent(duration=pause_ms)
 
     return audio_final
 
