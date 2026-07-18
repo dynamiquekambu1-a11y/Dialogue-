@@ -389,7 +389,43 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
 
 # ---------------------------------------------------------
-# 5. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
+# 5. EFFET "VOIX INTÉRIEURE DE FILM" (post-traitement pydub)
+# ---------------------------------------------------------
+
+def _appliquer_voix_interieure(segment: AudioSegment) -> AudioSegment:
+    """
+    Transforme un segment audio en "voix intérieure de film" :
+    - Volume réduit (voix proche, pas projetée)
+    - Léger écho simulé (réverbération simple par superposition décalée)
+    - Légère atténuation des fréquences hautes (rendu plus chaud, moins net)
+
+    C'est la voix qu'on entend dans sa tête dans les films —
+    pas une voix de salle, une voix de l'intérieur.
+    """
+    # 1. Baisser le volume global — voix intime, pas projetée
+    segment = segment - 4  # -4 dB
+
+    # 2. Simuler une légère réverbération par superposition de copies décalées
+    #    Écho 1 : copie à -80ms, volume -14dB
+    #    Écho 2 : copie à -160ms, volume -22dB
+    #    → donne un espace acoustique doux, pas une vraie salle, juste une "profondeur"
+    silence_court = AudioSegment.silent(duration=80)
+
+    echo1 = silence_court + segment - 14
+    echo2 = AudioSegment.silent(duration=160) + segment - 22
+
+    # On superpose les trois couches (original + 2 échos)
+    longueur_totale = max(len(segment), len(echo1), len(echo2))
+    resultat = AudioSegment.silent(duration=longueur_totale)
+    resultat = resultat.overlay(segment, position=0)
+    resultat = resultat.overlay(echo1, position=0)
+    resultat = resultat.overlay(echo2, position=0)
+
+    return resultat
+
+
+# ---------------------------------------------------------
+# 6. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
 # ---------------------------------------------------------
 
 async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
@@ -402,11 +438,17 @@ async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
         if chunk["type"] == "audio":
             audio_bytes.extend(chunk["data"])
 
-    return AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
+    segment = AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
+
+    # Appliquer l'effet "voix intérieure de film" uniquement sur la voix masculine
+    if genre == "homme":
+        segment = _appliquer_voix_interieure(segment)
+
+    return segment
 
 
 async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
-                                  pause_base_ms: int = 350) -> AudioSegment:
+                                  pause_base_ms: int = 400) -> AudioSegment:
     audio_final = AudioSegment.empty()
 
     for i, replique in enumerate(dialogue):
@@ -418,12 +460,12 @@ async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
         audio_final += segment
 
         if i < len(dialogue) - 1:
-            # Le silence après une réplique masculine est plus long —
-            # il fait partie du personnage (le poids du mot, le calme qui s'installe).
+            # Silence plus long après une réplique masculine —
+            # le mot reste suspendu dans l'air après lui.
             if genre == "homme":
-                pause_ms = pause_base_ms + 250   # 600ms total par défaut
+                pause_ms = pause_base_ms + 300   # ~700ms
             else:
-                pause_ms = pause_base_ms          # 350ms pour la femme
+                pause_ms = pause_base_ms          # ~400ms
             audio_final += AudioSegment.silent(duration=pause_ms)
 
     return audio_final
