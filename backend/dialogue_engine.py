@@ -21,7 +21,7 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-3.5-flash"# modèle rapide du plan gratuit ; ajustable si besoin
+GEMINI_MODEL = "gemini-2.5-flash"  # modèle rapide du plan gratuit ; ajustable si besoin
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
@@ -49,22 +49,39 @@ GENRES = {
 
 CIBLES_LOVE = {
     "pour_elle": (
-        "Dialogue romantique et rêveur, façon scène de film. Tension amoureuse, "
-        "déclaration sincère, un soupçon de danger ou d'interdit. Le personnage "
-        "masculin est charmant et audacieux, le personnage féminin oscille entre "
-        "inquiétude et attendrissement. Termine sur une chute mémorable, citable "
-        "en légende TikTok."
+        "Dialogue romantique et rêveur, façon scène de film. Elle commence sur "
+        "la défensive : réponses courtes, fermées, elle essaie de garder ses "
+        "distances ou de le repousser poliment. Lui est charmant, confiant et "
+        "audacieux — il ne se laisse pas décourager par ses réponses fermées "
+        "et insiste avec assurance jusqu'à faire craquer sa résistance. "
+        "Termine sur le moment précis où sa garde tombe (un silence qui en "
+        "dit long, une réplique qui la trahit malgré elle) — une chute "
+        "mémorable, citable en légende TikTok."
     ),
     "pour_lui": (
-        "Dialogue de drague courte et percutante, répliques brèves façon battle "
-        "de charme. Punchlines directement réutilisables comme réponse à un "
+        "Dialogue de drague courte et percutante, répliques brèves façon "
+        "battle de charme. Elle envoie des réponses fermées ou des piques "
+        "pour le tester et le repousser ; lui ne recule jamais et répond avec "
+        "assurance à chaque tentative de le décourager, jusqu'à ce qu'elle "
+        "craque. Punchlines directement réutilisables comme réponse à un "
         "commentaire ou légende TikTok. Ton confiant, drôle, jamais lourd."
     ),
     "mixte": (
-        "Dialogue romantique équilibré entre tension et humour, accessible à un "
-        "public large, avec une réplique finale marquante."
+        "Dialogue romantique équilibré entre tension et humour. Elle commence "
+        "fermée et distante, lui est déterminé et persévère avec charme, "
+        "jusqu'à ce que sa résistance cède. Termine sur une réplique finale "
+        "marquante, accessible à un public large."
     ),
 }
+
+# Garde-fou commun à toutes les cibles "love" : la persévérance doit rester
+# charmante, jamais insistante au point d'être malaisante ou irrespectueuse.
+_GARDE_FOU_LOVE = (
+    " Important : son insistance à lui reste toujours charmante et légère — "
+    "jamais lourde, jamais irrespectueuse, jamais au point de la mettre mal "
+    "à l'aise. Elle garde le contrôle de la situation à tout moment ; c'est "
+    "son propre trouble qui la fait craquer, pas une pression extérieure."
+)
 
 
 # ---------------------------------------------------------
@@ -85,7 +102,11 @@ def generer_dialogue_ia(genre: str, duree_secondes: int, nb_personnages: int,
 
     consigne_cible = ""
     if genre == "love":
-        consigne_cible = "\n\nConsigne de ciblage : " + CIBLES_LOVE.get(cible, CIBLES_LOVE["mixte"])
+        consigne_cible = (
+            "\n\nConsigne de ciblage : "
+            + CIBLES_LOVE.get(cible, CIBLES_LOVE["mixte"])
+            + _GARDE_FOU_LOVE
+        )
 
     if genre == "love" and nb_personnages == 2:
         noms = ["Elle", "Lui"]
@@ -104,7 +125,7 @@ Règles impératives :
 
 Pour CHAQUE réplique, indique aussi :
 - "genre" : "femme", "homme" ou "neutre" selon le personnage qui parle
-- "ton" : une courte indication de jeu (ex: "chuchote, paniquée" / "avec un sourire") — décrit COMMENT c'est dit, ne doit jamais être lu à voix haute
+- "ton" : une courte indication de jeu qui décrit COMMENT c'est dit, ne doit jamais être lu à voix haute. Pour un personnage masculin confiant, dominant ou séducteur, utilise de préférence des mots comme "sûr de lui", "posé", "ferme", "assuré" ou "dominant" plutôt que "avec un sourire" — ça change vraiment le rendu vocal.
 
 Ajoute aussi une clé "legende_suggeree" : une phrase courte et accrocheuse (tirée ou inspirée de la chute du dialogue) utilisable comme légende TikTok.
 
@@ -221,18 +242,31 @@ def attribuer_voix(dialogue: list[dict]) -> dict:
 
 _MOTS_CHUCHOTE = {"chuchote", "murmure", "bas", "doucement", "à voix basse"}
 _MOTS_CRIE = {"crie", "hurle", "fort", "colère", "énervé", "en colère"}
-_MOTS_RIT = {"rit", "sourire", "amusé", "joyeux", "en riant"}
+_MOTS_CONFIANT = {
+    "sûr de lui", "sourire en coin", "confiant", "dominant", "assuré",
+    "arrogant", "posé", "déterminé", "ferme", "autoritaire", "calme et sûr",
+}
+_MOTS_RIT = {"rit", "amusé", "joyeux", "en riant", "éclate de rire"}
 _MOTS_TRISTE = {"triste", "pleure", "déçu", "abattu"}
 
 
 def _ton_vers_prosodie(ton: str) -> tuple[str, str, str]:
-    """Retourne (rate, volume, pitch) au format attendu par edge-tts, ex: ('+10%', '-20%', '+5Hz')."""
+    """Retourne (rate, volume, pitch) au format attendu par edge-tts, ex: ('+10%', '-20%', '+5Hz').
+
+    L'ordre des tests compte : "confiant" est vérifié avant "rit", pour qu'une
+    indication comme "sourire en coin" (smirk assuré) ne soit pas confondue
+    avec "rit" (rire léger) — les deux appellent des voix très différentes.
+    """
     ton_lower = (ton or "").lower()
 
     if any(m in ton_lower for m in _MOTS_CHUCHOTE):
         return "-10%", "-30%", "+0Hz"
     if any(m in ton_lower for m in _MOTS_CRIE):
         return "+10%", "+20%", "+20Hz"
+    if any(m in ton_lower for m in _MOTS_CONFIANT):
+        # Débit ralenti et légèrement posé, voix plus grave, volume ferme :
+        # rendu direct et assuré plutôt que "lu" ou hésitant.
+        return "-8%", "+8%", "-10Hz"
     if any(m in ton_lower for m in _MOTS_RIT):
         return "+5%", "+0%", "+15Hz"
     if any(m in ton_lower for m in _MOTS_TRISTE):
