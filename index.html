@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Réplique — Dialogues audio pour créateurs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header class="site-header">
+  <span class="wordmark">RÉPLIQUE</span>
+  <span class="tagline">voix off pour vos scènes</span>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero">
+    <p class="slugline">INT. VILLA DU GÉNÉRAL — NUIT</p>
+    <h1>« Les meilleurs moments n'attendent pas.<br>Ils se créent. »</h1>
+    <p class="hero-sub">Choisissez un genre, une durée, un nombre de personnages — ou collez votre propre script. L'IA écrit et joue le dialogue. Vous récupérez le fichier audio, prêt pour CapCut ou TikTok.</p>
+  </section>
+
+  <!-- FORMULAIRE -->
+  <section class="panel" id="panel-form">
+
+    <div class="mode-toggle" role="tablist">
+      <button class="mode-btn active" data-mode="ia" role="tab" aria-selected="true">L'IA écrit le dialogue</button>
+      <button class="mode-btn" data-mode="manuel" role="tab" aria-selected="false">Coller mon script</button>
+    </div>
+
+    <!-- MODE IA -->
+    <div class="mode-panel" id="mode-ia">
+      <div class="field-group">
+        <label>Genre</label>
+        <div class="chip-row" id="genre-chips">
+          <button class="chip active" data-genre="love">❤️ Love</button>
+          <button class="chip" data-genre="drama">😢 Drama</button>
+          <button class="chip" data-genre="comedy">😂 Comedy</button>
+          <button class="chip" data-genre="horror">😱 Horror</button>
+          <button class="chip" data-genre="business">💼 Business</button>
+        </div>
+      </div>
+
+      <div class="field-group" id="cible-group">
+        <label>Cible <span class="hint">(challenges TikTok love/drague)</span></label>
+        <div class="chip-row" id="cible-chips">
+          <button class="chip active" data-cible="mixte">Mixte</button>
+          <button class="chip" data-cible="pour_elle">Pour elle — romantique</button>
+          <button class="chip" data-cible="pour_lui">Pour lui — drague</button>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field-group">
+          <label>Durée</label>
+          <div class="chip-row" id="duree-chips">
+            <button class="chip" data-duree="30">30 s</button>
+            <button class="chip active" data-duree="60">60 s</button>
+            <button class="chip" data-duree="120">2 min</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>Personnages</label>
+          <div class="chip-row" id="perso-chips">
+            <button class="chip active" data-nb="2">2</button>
+            <button class="chip" data-nb="3">3 <span class="badge-premium">Premium</span></button>
+            <button class="chip" data-nb="4">4 <span class="badge-premium">Premium</span></button>
+          </div>
+        </div>
+      </div>
+
+      <p class="hint" id="quota-info"></p>
+      <button class="btn-primary" id="btn-generer-ia">Générer le dialogue</button>
+    </div>
+
+    <!-- MODE MANUEL -->
+    <div class="mode-panel hidden" id="mode-manuel">
+      <div class="field-group">
+        <label>Votre script</label>
+        <p class="hint">Format : <code>Personnage (ton, optionnel) : « réplique »</code> — une ligne par réplique.</p>
+        <textarea id="script-manuel" rows="10" placeholder="Elle (chuchote, paniquée) : « Attends... comment tu es entré chez moi ? »
+Lui (avec un sourire) : « Non. Ils ne m'ont pas vu. »"></textarea>
+      </div>
+      <button class="btn-primary" id="btn-generer-manuel">Analyser mon script</button>
+    </div>
+
+  </section>
+
+  <!-- APERÇU DU DIALOGUE -->
+  <section class="panel hidden" id="panel-preview">
+    <div class="panel-header">
+      <h2>Aperçu du script</h2>
+      <p class="hint">Modifiez le texte ou le ton avant de générer l'audio.</p>
+    </div>
+
+    <div id="legende-suggeree" class="legende-box hidden">
+      <span class="legende-label">Légende TikTok suggérée</span>
+      <span id="legende-texte"></span>
+    </div>
+
+    <div id="dialogue-liste" class="dialogue-liste"></div>
+
+    <div class="field-group">
+      <label>Format de sortie</label>
+      <div class="chip-row" id="format-chips">
+        <button class="chip active" data-format="mp3">MP3</button>
+        <button class="chip" data-format="wav">WAV</button>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="btn-generer-audio">Générer l'audio</button>
+  </section>
+
+  <!-- RÉSULTAT AUDIO -->
+  <section class="panel hidden" id="panel-audio">
+    <h2>Votre fichier est prêt</h2>
+    <audio id="lecteur-audio" controls></audio>
+    <a class="btn-primary" id="lien-telechargement" download>Télécharger le fichier</a>
+  </section>
+
+  <div id="chargement" class="chargement hidden">
+    <div class="spinner"></div>
+    <p id="chargement-texte">Génération en cours…</p>
+  </div>
+
+  <div id="erreur" class="erreur hidden"></div>
+
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
