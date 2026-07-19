@@ -467,18 +467,3 @@ async def exporter_audio(dialogue: list[dict], format_sortie: str = "mp3",
     chemin = DOSSIER_AUDIO / nom_fichier
     audio_final.export(chemin, format=format_sortie)
     return nom_fichier
-
-
-async def exporter_audio(dialogue: list[dict], format_sortie: str = "mp3") -> str:
-    """
-    Pipeline complet à partir d'un dialogue déjà structuré (issu de l'IA ou du parsing manuel).
-    Retourne le nom du fichier généré (dans DOSSIER_AUDIO).
-    """
-    mapping_voix = attribuer_voix(dialogue)
-    audio_final = await generer_audio_dialogue(dialogue, mapping_voix)
-
-    nom_fichier = f"{uuid.uuid4().hex}.{format_sortie}"
-    chemin = DOSSIER_AUDIO / nom_fichier
-    audio_final.export(chemin, format=format_sortie)
-
-    return nom_fichier
