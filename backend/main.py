@@ -98,17 +98,24 @@ def generer_dialogue(requete: RequeteGeneration, request: Request):
 
 
 @app.post("/api/generer-audio")
-async def generer_audio(requete: RequeteAudio):
-    """
-    Prend un dialogue structuré (éventuellement édité par l'utilisateur)
-    et produit le fichier audio final.
-    """
+async def generer_audio(requete: RequeteAudio, request: Request):
     dialogue = [r.dict() for r in requete.dialogue]
     if not dialogue:
         raise HTTPException(400, "Dialogue vide.")
 
+    # Admin et utilisateurs premium → ElevenLabs, sinon edge-tts
+    identifiant = quota_module.obtenir_identifiant(request)
+    premium = (
+        quota_module.cle_admin_valide(request)
+        or quota_module.est_premium(identifiant)
+    )
+
     try:
-        nom_fichier = await engine.exporter_audio(dialogue, format_sortie=requete.format_sortie)
+        nom_fichier = await engine.exporter_audio(
+            dialogue,
+            format_sortie=requete.format_sortie,
+            premium=premium,
+        )
     except Exception as e:
         raise HTTPException(500, f"Erreur de synthèse vocale : {e}")
 
