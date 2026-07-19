@@ -348,94 +348,44 @@ _MOTS_TRISTE = {"triste", "pleure", "déçu", "abattu"}
 
 
 def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
-    """Retourne (rate, volume, pitch) au format attendu par edge-tts.
-
-    PROFIL ROGER — "Capitaine Calme" (appliqué à tous les hommes par défaut) :
-    - Baritone profond, ~100 mots/min
-    - Ton stable, zéro nervosité, pauses naturelles
-    - Fidèle, aimant, protecteur — ferme mais doux
-    - Interdit : voix qui monte, précipitation, nervosité
-    """
     ton_lower = (ton or "").lower()
 
     if any(m in ton_lower for m in _MOTS_CHUCHOTE):
         if genre == "homme":
-            # Murmure du Capitaine : encore plus lent, très grave, presque inaudible
-            return "-25%", "-20%", "-15Hz"
+            return "-10%", "-10%", "-12Hz"
         return "-15%", "-35%", "+0Hz"
 
     if any(m in ton_lower for m in _MOTS_CRIE):
         if genre == "homme":
-            # Le Capitaine ne crie jamais — il élève juste légèrement la voix, ferme
-            return "-5%", "+15%", "-5Hz"
+            return "+5%", "+15%", "-5Hz"
         return "+15%", "+25%", "+20Hz"
 
     if any(m in ton_lower for m in _MOTS_CONFIANT):
         if genre == "homme":
-            # Capitaine Calme plein — maximum de présence et de profondeur
-            # -20% débit = 100 mots/min environ, chaque mot suspendu
-            # -18Hz pitch = aussi grave que possible avec Remy
-            # +8% volume = présence ferme et douce à la fois
-            return "-20%", "+8%", "-18Hz"
+            # Direct, grave, posé — pas lent, juste ancré
+            return "-5%", "+10%", "-18Hz"
         else:
             return "-10%", "+8%", "-8Hz"
 
     if any(m in ton_lower for m in _MOTS_RIT):
         if genre == "homme":
-            # Le Capitaine sourit — pas d'aigu, juste un peu plus de chaleur
-            return "-10%", "+5%", "-8Hz"
+            return "+0%", "+5%", "-10Hz"
         return "+5%", "+0%", "+15Hz"
 
     if any(m in ton_lower for m in _MOTS_TRISTE):
         if genre == "homme":
-            # Émotion contenue — le Capitaine ne s'effondre pas, il encaisse
-            return "-15%", "-5%", "-12Hz"
+            return "-5%", "-5%", "-12Hz"
         return "-10%", "+0%", "-15Hz"
 
-    # DÉFAUT HOMME = Capitaine Calme de base
-    # Même sans indication de ton, Roger parle lentement et grave.
-    # C'est sa signature — il ne "lit" jamais, il "dit".
+    # Défaut homme : grave et direct, débit normal
     if genre == "homme":
-        return "-18%", "+5%", "-15Hz"
+        return "-5%", "+8%", "-15Hz"
 
     return "+0%", "+0%", "+0Hz"
 
 
 # ---------------------------------------------------------
-# 5. EFFET "VOIX INTÉRIEURE DE FILM" (post-traitement pydub)
-# ---------------------------------------------------------
-
-def _appliquer_voix_interieure(segment: AudioSegment) -> AudioSegment:
-    """
-    Effet "voix intérieure de film" — profil Capitaine Calme :
-    - Volume légèrement réduit (voix proche, intime, pas projetée dans une salle)
-    - Réverbération douce à 3 couches (profondeur sans effet de karaoké)
-    - Rendu chaud et dense, comme une voix qui résonne de l'intérieur
-
-    Bébé écoute-moi bien. / Parce que toi... c'est ma maison.
-    → Voilà l'énergie qu'on cherche.
-    """
-    # Volume global : présent mais pas dans ta face
-    segment = segment - 3  # -3 dB
-
-    # Réverbération à 3 couches — délais courts pour rester intime
-    # (une grande salle utiliserait 300ms+, ici on reste à 60/120/200ms)
-    e1 = AudioSegment.silent(duration=60)  + segment - 12  # écho 1 : proche
-    e2 = AudioSegment.silent(duration=120) + segment - 18  # écho 2 : milieu
-    e3 = AudioSegment.silent(duration=200) + segment - 26  # écho 3 : lointain
-
-    longueur = max(len(segment), len(e1), len(e2), len(e3))
-    resultat = AudioSegment.silent(duration=longueur)
-    resultat = resultat.overlay(segment, position=0)
-    resultat = resultat.overlay(e1, position=0)
-    resultat = resultat.overlay(e2, position=0)
-    resultat = resultat.overlay(e3, position=0)
-
-    return resultat
-
-
-# ---------------------------------------------------------
-# 6. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
+# 5. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
 # ---------------------------------------------------------
 
 async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
@@ -449,16 +399,11 @@ async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
             audio_bytes.extend(chunk["data"])
 
     segment = AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
-
-    # Appliquer l'effet "voix intérieure de film" uniquement sur la voix masculine
-    if genre == "homme":
-        segment = _appliquer_voix_interieure(segment)
-
     return segment
 
 
 async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
-                                  pause_base_ms: int = 400) -> AudioSegment:
+                                  pause_base_ms: int = 350) -> AudioSegment:
     audio_final = AudioSegment.empty()
 
     for i, replique in enumerate(dialogue):
@@ -470,12 +415,7 @@ async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
         audio_final += segment
 
         if i < len(dialogue) - 1:
-            # Silence plus long après une réplique masculine —
-            # le mot reste suspendu dans l'air après lui.
-            if genre == "homme":
-                pause_ms = pause_base_ms + 300   # ~700ms
-            else:
-                pause_ms = pause_base_ms          # ~400ms
+            pause_ms = pause_base_ms + 200 if genre == "homme" else pause_base_ms
             audio_final += AudioSegment.silent(duration=pause_ms)
 
     return audio_final
