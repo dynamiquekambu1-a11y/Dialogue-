@@ -360,8 +360,7 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
     if any(m in ton_lower for m in _MOTS_CONFIANT):
         if genre == "homme":
-            # Direct, grave, posé — pas lent, juste ancré
-            return "-5%", "+10%", "-18Hz"
+            return "-5%", "+8%", "-12Hz"
         else:
             return "-10%", "+8%", "-8Hz"
 
@@ -377,7 +376,7 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
     # Défaut homme : grave et direct, débit normal
     if genre == "homme":
-        return "-5%", "+8%", "-15Hz"
+        return "+0%", "+5%", "-10Hz"
 
     return "+0%", "+0%", "+0Hz"
 
