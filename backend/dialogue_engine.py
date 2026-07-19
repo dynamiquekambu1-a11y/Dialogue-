@@ -19,7 +19,7 @@ import google.generativeai as genai
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash"
 
 # Groq — fallback automatique quand Gemini atteint son quota (429).
 _GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
