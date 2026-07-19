@@ -1,9 +1,11 @@
 """
-Moteur du générateur de dialogues audio — VERSION GRATUITE V2.
+Moteur du générateur de dialogues audio — VERSION GRATUITE.
 
-- Écriture du dialogue : Google Gemini API
-- Synthèse vocale : edge-tts
-- Tendance vocale : ROGER=Strict/Rapide, ALINE=Paniquée/Chaleureuse
+- Écriture du dialogue : Google Gemini API (plan gratuit, sans carte bancaire)
+- Synthèse vocale : edge-tts (voix Microsoft Edge, gratuit et illimité)
+
+Gère : génération IA du script, parsing d'un script manuel,
+attribution des voix par genre, synthèse vocale, fusion audio.
 """
 
 import asyncio
@@ -22,6 +24,8 @@ genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 GEMINI_MODEL = "gemini-3.5-flash"
 
 # Groq — fallback automatique quand Gemini atteint son quota (429).
+# Compatible OpenAI, pas de carte bancaire, ~14 000 req/jour gratuits.
+# Si GROQ_API_KEY n'est pas définie, le fallback est désactivé silencieusement.
 _GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
@@ -30,18 +34,56 @@ DOSSIER_AUDIO.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------
 # VOIX SIGNATURES — fixes, identité sonore de l'application.
-# VERSION 2.0 : ROGER STRICT, ALINE EXPRESSIVE
+#
+#   ALINE — fr-FR-DeniseNeural
+#     Naturelle, chaleureuse, légèrement intense.
+#
+#   ROGER — fr-FR-RemyMultilingualNeural
+#     Voix conversationnelle moderne, fluide et naturelle.
+#     Bien meilleure que Henri pour la drague et le dialogue intime.
+#     Les réglages "Capitaine Calme" sont adoucis pour coller
+#     à un ton poème/séduction plutôt qu'autoritaire.
 # ---------------------------------------------------------
 
-VOIX_ALINE = "fr-FR-DeniseNeural" # Femme : chaleureuse, peut paniquer
-VOIX_ROGER = "fr-FR-HenriNeural" # Homme : Strict, grave, rapide
+VOIX_ALINE = "fr-FR-DeniseNeural"
+VOIX_ROGER = "fr-FR-RemyMultilingualNeural"
 
-VOIX_FEMME = [VOIX_ALINE]
-VOIX_HOMME = [VOIX_ROGER]
+VOIX_FEMME  = [VOIX_ALINE]
+VOIX_HOMME  = [VOIX_ROGER]
 VOIX_NEUTRE = [VOIX_ALINE, VOIX_ROGER]
 
-MOTS_CLES_FEMME = {"elle", "femme", "fille", "elle1", "elle2", "sarah"}
-MOTS_CLES_HOMME = {"lui", "homme", "garçon", "garcon", "lui1", "lui2", "alex", "frere"}
+MOTS_CLES_FEMME = {"elle", "femme", "fille", "elle1", "elle2"}
+MOTS_CLES_HOMME = {"lui", "homme", "garçon", "garcon", "lui1", "lui2"}
+
+DEBIT_PAROLE_MOTS_PAR_MIN = 150
+
+DOSSIER_AUDIO = Path("audio_generes")
+DOSSIER_AUDIO.mkdir(exist_ok=True)
+
+# ---------------------------------------------------------
+# VOIX SIGNATURES — fixes, jamais changeantes.
+# C'est l'identité sonore de l'application.
+#
+#   ALINE — fr-FR-DeniseNeural
+#     Voix féminine : naturelle, chaleureuse, légèrement intense.
+#     Elle reste Aline quel que soit le personnage féminin.
+#
+#   ROGER — fr-FR-HenriNeural
+#     Voix masculine : autoritaire, ancrée, grave.
+#     Réglages "Capitaine Calme" appliqués par dessus pour le rendu séducteur.
+#     Il reste Roger quel que soit le personnage masculin.
+# ---------------------------------------------------------
+
+VOIX_ALINE = "fr-FR-DeniseNeural"   # signature féminine
+VOIX_ROGER = "fr-FR-HenriNeural"    # signature masculine
+
+# Compatibilité avec le reste du code (attribuer_voix utilise des listes)
+VOIX_FEMME  = [VOIX_ALINE]
+VOIX_HOMME  = [VOIX_ROGER]
+VOIX_NEUTRE = [VOIX_ALINE, VOIX_ROGER]
+
+MOTS_CLES_FEMME = {"elle", "femme", "fille", "elle1", "elle2"}
+MOTS_CLES_HOMME = {"lui", "homme", "garçon", "garcon", "lui1", "lui2"}
 
 DEBIT_PAROLE_MOTS_PAR_MIN = 150
 
@@ -56,32 +98,47 @@ GENRES = {
 CIBLES_LOVE = {
     "pour_elle": (
         "Dialogue romantique et rêveur, façon scène de film. Elle commence sur "
-        "la défensive : réponses courtes, fermées. Lui est charmant, confiant et "
-        "audacieux — il insiste avec assurance. "
-        "Termine sur le moment précis où sa garde tombe."
+        "la défensive : réponses courtes, fermées, elle essaie de garder ses "
+        "distances ou de le repousser poliment. Lui est charmant, confiant et "
+        "audacieux — il ne se laisse pas décourager par ses réponses fermées "
+        "et insiste avec assurance jusqu'à faire craquer sa résistance. "
+        "Termine sur le moment précis où sa garde tombe (un silence qui en "
+        "dit long, une réplique qui la trahit malgré elle) — une chute "
+        "mémorable, citable en légende TikTok."
     ),
     "pour_lui": (
-        "Dialogue de drague courte et percutante. Elle teste, lui répond avec "
+        "Dialogue de drague courte et percutante, répliques brèves façon "
+        "battle de charme. Elle envoie des réponses fermées ou des piques "
+        "pour le tester et le repousser ; lui ne recule jamais et répond avec "
         "assurance à chaque tentative de le décourager, jusqu'à ce qu'elle "
-        "craque. Ton confiant, drôle, jamais lourd."
+        "craque. Punchlines directement réutilisables comme réponse à un "
+        "commentaire ou légende TikTok. Ton confiant, drôle, jamais lourd."
     ),
     "mixte": (
         "Dialogue romantique équilibré entre tension et humour. Elle commence "
-        "fermée et distante, lui est déterminé et persévère avec charme."
+        "fermée et distante, lui est déterminé et persévère avec charme, "
+        "jusqu'à ce que sa résistance cède. Termine sur une réplique finale "
+        "marquante, accessible à un public large."
     ),
 }
 
+# Garde-fou commun à toutes les cibles "love" : la persévérance doit rester
+# charmante, jamais insistante au point d'être malaisante ou irrespectueuse.
 _GARDE_FOU_LOVE = (
     " Important : son insistance à lui reste toujours charmante et légère — "
-    "jamais lourde, jamais irrespectueuse."
+    "jamais lourde, jamais irrespectueuse, jamais au point de la mettre mal "
+    "à l'aise. Elle garde le contrôle de la situation à tout moment ; c'est "
+    "son propre trouble qui la fait craquer, pas une pression extérieure."
 )
 
+
 # ---------------------------------------------------------
-# 1. GÉNÉRATION DU DIALOGUE PAR L'IA
+# 1. GÉNÉRATION DU DIALOGUE PAR L'IA (Gemini avec fallback Groq)
 # ---------------------------------------------------------
 
 def _construire_prompt(genre: str, duree_secondes: int,
                         nb_personnages: int, cible: str) -> tuple[str, str]:
+    """Construit le prompt système et le message utilisateur. Réutilisé par Gemini et Groq."""
     nb_mots_cible = int((duree_secondes / 60) * DEBIT_PAROLE_MOTS_PAR_MIN)
 
     consigne_cible = ""
@@ -97,7 +154,7 @@ def _construire_prompt(genre: str, duree_secondes: int,
     else:
         noms = [f"Personnage{i+1}" for i in range(nb_personnages)]
 
-    prompt_systeme = f"""Tu es scénariste, spécialisé dans l'écriture de dialogues courts pour les réseaux sociaux.
+    prompt_systeme = f"""Tu es scénariste, spécialisé dans l'écriture de dialogues courts pour les réseaux sociaux (TikTok, Reels, Shorts).
 
 Règles impératives :
 - Ton du dialogue : {GENRES[genre]}
@@ -108,23 +165,25 @@ Règles impératives :
 - Chute marquante à la fin{consigne_cible}
 
 Pour CHAQUE réplique, indique aussi :
-- "genre" : "femme", "homme" ou "neutre"
-- "ton" : une courte indication de jeu. Ex: "paniquée", "strict", "sûr de lui", "chuchote"
+- "genre" : "femme", "homme" ou "neutre" selon le personnage qui parle
+- "ton" : une courte indication de jeu qui décrit COMMENT c'est dit, ne doit jamais être lu à voix haute. Pour un personnage masculin confiant, dominant ou séducteur, utilise de préférence des mots comme "sûr de lui", "posé", "ferme", "assuré" ou "dominant" plutôt que "avec un sourire" — ça change vraiment le rendu vocal.
 
-Ajoute aussi une clé "legende_suggeree".
+Ajoute aussi une clé "legende_suggeree" : une phrase courte et accrocheuse (tirée ou inspirée de la chute du dialogue) utilisable comme légende TikTok.
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
 {{
   "dialogue": [
     {{"personnage": "Elle", "genre": "femme", "ligne": "...", "ton": "chuchote, paniquée"}},
-    {{"personnage": "Lui", "genre": "homme", "ligne": "...", "ton": "strict"}}
+    {{"personnage": "Lui", "genre": "homme", "ligne": "...", "ton": "sûr de lui"}}
   ],
   "legende_suggeree": "..."
 }}
 """
     return prompt_systeme, "Écris le dialogue maintenant."
 
+
 def _generer_via_gemini(prompt_systeme: str, message: str) -> dict:
+    """Génère un dialogue via Gemini."""
     model = genai.GenerativeModel(
         model_name=GEMINI_MODEL,
         system_instruction=prompt_systeme,
@@ -136,7 +195,9 @@ def _generer_via_gemini(prompt_systeme: str, message: str) -> dict:
     response = model.generate_content(message)
     return json.loads(response.text)
 
+
 def _generer_via_groq(prompt_systeme: str, message: str) -> dict:
+    """Génère un dialogue via Groq (fallback quand Gemini est à court de quota)."""
     from openai import OpenAI as GroqClient
     client = GroqClient(
         api_key=_GROQ_API_KEY,
@@ -155,29 +216,40 @@ def _generer_via_groq(prompt_systeme: str, message: str) -> dict:
     texte = texte.replace("```json", "").replace("```", "").strip()
     return json.loads(texte)
 
+
 def generer_dialogue_ia(genre: str, duree_secondes: int, nb_personnages: int,
                          cible: str = "mixte") -> dict:
+    """
+    Génère un dialogue via Gemini. Si Gemini dépasse son quota (erreur 429),
+    bascule automatiquement sur Groq — invisible pour l'utilisateur.
+    """
     if genre not in GENRES:
         raise ValueError(f"Genre inconnu. Choix possibles : {list(GENRES.keys())}")
 
     prompt_systeme, message = _construire_prompt(genre, duree_secondes, nb_personnages, cible)
 
+    # Tentative 1 : Gemini
     try:
         return _generer_via_gemini(prompt_systeme, message)
     except Exception as e:
+        # Si c'est un quota Gemini (429) ET que Groq est configuré → on bascule
         if "429" in str(e) and _GROQ_API_KEY:
-            pass
+            pass  # on continue vers Groq
         else:
-            raise
+            raise  # autre erreur → on la remonte normalement
+
+    # Tentative 2 : Groq (fallback automatique)
     return _generer_via_groq(prompt_systeme, message)
 
+
 # ---------------------------------------------------------
-# 2. PARSING D'UN SCRIPT ÉCRIT MANUELLEMENT
+# 2. PARSING D'UN SCRIPT ÉCRIT MANUELLEMENT PAR L'UTILISATEUR
 # ---------------------------------------------------------
 
 LIGNE_DIALOGUE_REGEX = re.compile(
     r"^\s*(?P<perso>[^():\n]{1,30}?)\s*(\((?P<ton>[^)]*)\))?\s*:\s*(?P<ligne>.+?)\s*$"
 )
+
 
 def _deviner_genre(nom_personnage: str) -> str:
     nom = nom_personnage.strip().lower()
@@ -187,7 +259,16 @@ def _deviner_genre(nom_personnage: str) -> str:
         return "homme"
     return "neutre"
 
+
 def parser_script_manuel(texte: str) -> list[dict]:
+    """
+    Parse un script collé par l'utilisateur, au format :
+        Elle (chuchote, paniquée) : « Attends... »
+        Lui (avec un sourire) : « Non. »
+
+    Les lignes qui ne correspondent pas au format (ex: "🎬 Scène : ...")
+    sont ignorées automatiquement (considérées comme indications de mise en scène).
+    """
     dialogue = []
     for ligne_brute in texte.splitlines():
         if not ligne_brute.strip():
@@ -216,11 +297,16 @@ def parser_script_manuel(texte: str) -> list[dict]:
 
     return dialogue
 
+
 # ---------------------------------------------------------
-# 3. ATTRIBUTION DES VOIX
+# 3. ATTRIBUTION DES VOIX (par personnage unique, selon le genre)
 # ---------------------------------------------------------
 
 def attribuer_voix(dialogue: list[dict]) -> dict:
+    """
+    Associe une voix distincte à chaque personnage unique, piochée dans la
+    banque de voix correspondant à son genre déclaré (femme/homme/neutre).
+    """
     compteurs = {"femme": 0, "homme": 0, "neutre": 0}
     banques = {"femme": VOIX_FEMME, "homme": VOIX_HOMME, "neutre": VOIX_NEUTRE}
     mapping = {}
@@ -239,94 +325,117 @@ def attribuer_voix(dialogue: list[dict]) -> dict:
 
     return mapping
 
+
 # ---------------------------------------------------------
-# 4. TON -> PROSODIE V2 : STRICT + PANIQUE
+# 4. TON -> PROSODIE (edge-tts n'a pas d'"instructions" comme OpenAI,
+#    on approxime donc l'émotion via débit/volume/hauteur de voix)
 # ---------------------------------------------------------
 
 _MOTS_CHUCHOTE = {"chuchote", "murmure", "bas", "doucement", "à voix basse", "souffle"}
 _MOTS_CRIE = {"crie", "hurle", "fort", "colère", "énervé", "en colère"}
 
+# "La Voix du Capitaine Calme" : bas, posé, stable, intentionnel.
+# Chaque mot a du poids. On ne convainc pas — on constate.
 _MOTS_CONFIANT = {
-    "sûr de lui", "confiant", "dominant", "assuré", "posé", "déterminé",
-    "ferme", "autoritaire", "strict", "sec", "direct"
+    "sûr de lui", "sourire en coin", "confiant", "dominant", "assuré",
+    "arrogant", "posé", "déterminé", "ferme", "autoritaire", "calme et sûr",
+    "séducteur", "séduisant", "regard direct", "imperturbable", "tranquille",
+    "murmure séducteur", "voix grave", "calme absolu",
 }
 
 _MOTS_RIT = {"rit", "amusé", "joyeux", "en riant", "éclate de rire"}
 _MOTS_TRISTE = {"triste", "pleure", "déçu", "abattu"}
-_MOTS_PANIQUE = {"paniquée", "peur", "stressée", "affolée", "urgent"}
+
 
 def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
-    """Retourne (rate, volume, pitch) pour edge-tts."""
+    """Retourne (rate, volume, pitch) au format attendu par edge-tts.
+
+    PROFIL ROGER — "Capitaine Calme" (appliqué à tous les hommes par défaut) :
+    - Baritone profond, ~100 mots/min
+    - Ton stable, zéro nervosité, pauses naturelles
+    - Fidèle, aimant, protecteur — ferme mais doux
+    - Interdit : voix qui monte, précipitation, nervosité
+    """
     ton_lower = (ton or "").lower()
 
-    # 1. CHUCHOTE
     if any(m in ton_lower for m in _MOTS_CHUCHOTE):
         if genre == "homme":
-            return "-5%", "-10%", "-8Hz" # Strict même en chuchotant
-        return "-20%", "-30%", "+5Hz" # Femme chuchotée et rapide
+            # Murmure du Capitaine : encore plus lent, très grave, presque inaudible
+            return "-25%", "-20%", "-15Hz"
+        return "-15%", "-35%", "+0Hz"
 
-    # 2. PANIQUE - NOUVEAU POUR ALINE
-    if any(m in ton_lower for m in _MOTS_PANIQUE):
-        if genre == "femme":
-            # Rapide, aigu, volume monte
-            return "+25%", "+10%", "+20Hz"
-        return "+10%", "+15%", "+5Hz"
-
-    # 3. CRIE
     if any(m in ton_lower for m in _MOTS_CRIE):
         if genre == "homme":
-            return "+15%", "+25%", "-2Hz" # Ordre sec
-        return "+20%", "+30%", "+25Hz"
+            # Le Capitaine ne crie jamais — il élève juste légèrement la voix, ferme
+            return "-5%", "+15%", "-5Hz"
+        return "+15%", "+25%", "+20Hz"
 
-    # 4. STRICT/CONFIANT - NOUVEAU POUR ROGER
     if any(m in ton_lower for m in _MOTS_CONFIANT):
         if genre == "homme":
-            # STRICT ET RAPIDE: +18% vitesse, grave, +10 volume
-            return "+18%", "+10%", "-12Hz"
+            # Capitaine Calme plein — maximum de présence et de profondeur
+            # -20% débit = 100 mots/min environ, chaque mot suspendu
+            # -18Hz pitch = aussi grave que possible avec Remy
+            # +8% volume = présence ferme et douce à la fois
+            return "-20%", "+8%", "-18Hz"
         else:
-            return "-5%", "+5%", "-5Hz"
+            return "-10%", "+8%", "-8Hz"
 
-    # 5. RIT
     if any(m in ton_lower for m in _MOTS_RIT):
         if genre == "homme":
-            return "+5%", "+5%", "-5Hz"
-        return "+10%", "+5%", "+15Hz"
+            # Le Capitaine sourit — pas d'aigu, juste un peu plus de chaleur
+            return "-10%", "+5%", "-8Hz"
+        return "+5%", "+0%", "+15Hz"
 
-    # 6. TRISTE
     if any(m in ton_lower for m in _MOTS_TRISTE):
         if genre == "homme":
-            return "-5%", "-5%", "-8Hz"
-        return "-15%", "-5%", "-15Hz"
+            # Émotion contenue — le Capitaine ne s'effondre pas, il encaisse
+            return "-15%", "-5%", "-12Hz"
+        return "-10%", "+0%", "-15Hz"
 
-    # DÉFAUT
+    # DÉFAUT HOMME = Capitaine Calme de base
+    # Même sans indication de ton, Roger parle lentement et grave.
+    # C'est sa signature — il ne "lit" jamais, il "dit".
     if genre == "homme":
-        # Par défaut Roger est strict et rapide
-        return "+12%", "+8%", "-10Hz"
-
-    if genre == "femme":
-        # Par défaut Aline est normale
-        return "+0%", "+0%", "+0Hz"
+        return "-18%", "+5%", "-15Hz"
 
     return "+0%", "+0%", "+0Hz"
 
-# ---------------------------------------------------------
-# 5. EFFET "VOIX STRICTE" - SEC SANS REVERB
-# ---------------------------------------------------------
-
-def _appliquer_voix_stricte(segment: AudioSegment) -> AudioSegment:
-    """
-    Effet "Voix Stricte" pour ROGER:
-    - +3dB pour l’autorité
-    - High-pass pour enlever le "brouillon" et rester net
-    - Aucune reverb
-    """
-    segment = segment + 3
-    segment = segment.high_pass_filter(120)
-    segment = segment.compress_dynamic_range(threshold=-20.0, ratio=4.0)
-    return segment
 
 # ---------------------------------------------------------
-# 6. SYNTHÈSE VOCALE + FUSION AUDIO
+# 5. EFFET "VOIX INTÉRIEURE DE FILM" (post-traitement pydub)
+# ---------------------------------------------------------
+
+def _appliquer_voix_interieure(segment: AudioSegment) -> AudioSegment:
+    """
+    Effet "voix intérieure de film" — profil Capitaine Calme :
+    - Volume légèrement réduit (voix proche, intime, pas projetée dans une salle)
+    - Réverbération douce à 3 couches (profondeur sans effet de karaoké)
+    - Rendu chaud et dense, comme une voix qui résonne de l'intérieur
+
+    Bébé écoute-moi bien. / Parce que toi... c'est ma maison.
+    → Voilà l'énergie qu'on cherche.
+    """
+    # Volume global : présent mais pas dans ta face
+    segment = segment - 3  # -3 dB
+
+    # Réverbération à 3 couches — délais courts pour rester intime
+    # (une grande salle utiliserait 300ms+, ici on reste à 60/120/200ms)
+    e1 = AudioSegment.silent(duration=60)  + segment - 12  # écho 1 : proche
+    e2 = AudioSegment.silent(duration=120) + segment - 18  # écho 2 : milieu
+    e3 = AudioSegment.silent(duration=200) + segment - 26  # écho 3 : lointain
+
+    longueur = max(len(segment), len(e1), len(e2), len(e3))
+    resultat = AudioSegment.silent(duration=longueur)
+    resultat = resultat.overlay(segment, position=0)
+    resultat = resultat.overlay(e1, position=0)
+    resultat = resultat.overlay(e2, position=0)
+    resultat = resultat.overlay(e3, position=0)
+
+    return resultat
+
+
+# ---------------------------------------------------------
+# 6. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
 # ---------------------------------------------------------
 
 async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
@@ -341,11 +450,12 @@ async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
 
     segment = AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
 
-    # Appliquer l'effet "voix stricte" uniquement sur la voix masculine
+    # Appliquer l'effet "voix intérieure de film" uniquement sur la voix masculine
     if genre == "homme":
-        segment = _appliquer_voix_stricte(segment)
+        segment = _appliquer_voix_interieure(segment)
 
     return segment
+
 
 async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
                                   pause_base_ms: int = 400) -> AudioSegment:
@@ -360,16 +470,22 @@ async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
         audio_final += segment
 
         if i < len(dialogue) - 1:
-            # PAUSE COURTE APRÈS L'HOMME STRICT
+            # Silence plus long après une réplique masculine —
+            # le mot reste suspendu dans l'air après lui.
             if genre == "homme":
-                pause_ms = pause_base_ms - 150 # ~250ms
+                pause_ms = pause_base_ms + 300   # ~700ms
             else:
-                pause_ms = pause_base_ms # ~400ms
+                pause_ms = pause_base_ms          # ~400ms
             audio_final += AudioSegment.silent(duration=pause_ms)
 
     return audio_final
 
+
 async def exporter_audio(dialogue: list[dict], format_sortie: str = "mp3") -> str:
+    """
+    Pipeline complet à partir d'un dialogue déjà structuré (issu de l'IA ou du parsing manuel).
+    Retourne le nom du fichier généré (dans DOSSIER_AUDIO).
+    """
     mapping_voix = attribuer_voix(dialogue)
     audio_final = await generer_audio_dialogue(dialogue, mapping_voix)
 
