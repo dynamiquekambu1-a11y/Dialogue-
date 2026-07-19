@@ -350,40 +350,53 @@ _MOTS_TRISTE = {"triste", "pleure", "déçu", "abattu"}
 def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
     """Retourne (rate, volume, pitch) au format attendu par edge-tts.
 
-    Pour un personnage masculin avec ton confiant/dominant, on applique
-    la "Voix du Capitaine Calme" : débit très ralenti, pitch grave, volume
-    ferme. C'est un profil vocal différent de la version féminine confiante.
+    PROFIL ROGER — "Capitaine Calme" (appliqué à tous les hommes par défaut) :
+    - Baritone profond, ~100 mots/min
+    - Ton stable, zéro nervosité, pauses naturelles
+    - Fidèle, aimant, protecteur — ferme mais doux
+    - Interdit : voix qui monte, précipitation, nervosité
     """
     ton_lower = (ton or "").lower()
 
     if any(m in ton_lower for m in _MOTS_CHUCHOTE):
-        # Chuchoter : lent, très doux, neutre en pitch
+        if genre == "homme":
+            # Murmure du Capitaine : encore plus lent, très grave, presque inaudible
+            return "-25%", "-20%", "-15Hz"
         return "-15%", "-35%", "+0Hz"
 
     if any(m in ton_lower for m in _MOTS_CRIE):
-        # Crier : rapide, fort, aigu
+        if genre == "homme":
+            # Le Capitaine ne crie jamais — il élève juste légèrement la voix, ferme
+            return "-5%", "+15%", "-5Hz"
         return "+15%", "+25%", "+20Hz"
 
     if any(m in ton_lower for m in _MOTS_CONFIANT):
         if genre == "homme":
-            # Drague/poème : lent et posé, légèrement grave, pas écrasant.
-            # -15% débit = chaque mot compte, on ne se précipite pas.
-            # -10Hz pitch = voix grave mais pas lourde, juste plus chaude.
-            # +5% volume = présence douce, pas dominante.
-            return "-15%", "+5%", "-10Hz"
+            # Capitaine Calme plein — maximum de présence et de profondeur
+            # -20% débit = 100 mots/min environ, chaque mot suspendu
+            # -18Hz pitch = aussi grave que possible avec Remy
+            # +8% volume = présence ferme et douce à la fois
+            return "-20%", "+8%", "-18Hz"
         else:
             return "-10%", "+8%", "-8Hz"
 
     if any(m in ton_lower for m in _MOTS_RIT):
+        if genre == "homme":
+            # Le Capitaine sourit — pas d'aigu, juste un peu plus de chaleur
+            return "-10%", "+5%", "-8Hz"
         return "+5%", "+0%", "+15Hz"
 
     if any(m in ton_lower for m in _MOTS_TRISTE):
+        if genre == "homme":
+            # Émotion contenue — le Capitaine ne s'effondre pas, il encaisse
+            return "-15%", "-5%", "-12Hz"
         return "-10%", "+0%", "-15Hz"
 
-    # Défaut pour un homme : légèrement ralenti et grave par rapport au neutre.
-    # Remy est déjà naturellement plus doux que Henri — on évite de trop forcer.
+    # DÉFAUT HOMME = Capitaine Calme de base
+    # Même sans indication de ton, Roger parle lentement et grave.
+    # C'est sa signature — il ne "lit" jamais, il "dit".
     if genre == "homme":
-        return "-5%", "+0%", "-5Hz"
+        return "-18%", "+5%", "-15Hz"
 
     return "+0%", "+0%", "+0Hz"
 
@@ -394,32 +407,29 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
 def _appliquer_voix_interieure(segment: AudioSegment) -> AudioSegment:
     """
-    Transforme un segment audio en "voix intérieure de film" :
-    - Volume réduit (voix proche, pas projetée)
-    - Léger écho simulé (réverbération simple par superposition décalée)
-    - Légère atténuation des fréquences hautes (rendu plus chaud, moins net)
+    Effet "voix intérieure de film" — profil Capitaine Calme :
+    - Volume légèrement réduit (voix proche, intime, pas projetée dans une salle)
+    - Réverbération douce à 3 couches (profondeur sans effet de karaoké)
+    - Rendu chaud et dense, comme une voix qui résonne de l'intérieur
 
-    C'est la voix qu'on entend dans sa tête dans les films —
-    pas une voix de salle, une voix de l'intérieur.
+    Bébé écoute-moi bien. / Parce que toi... c'est ma maison.
+    → Voilà l'énergie qu'on cherche.
     """
-    # 1. Baisser le volume global — voix intime, pas projetée
-    segment = segment - 4  # -4 dB
+    # Volume global : présent mais pas dans ta face
+    segment = segment - 3  # -3 dB
 
-    # 2. Simuler une légère réverbération par superposition de copies décalées
-    #    Écho 1 : copie à -80ms, volume -14dB
-    #    Écho 2 : copie à -160ms, volume -22dB
-    #    → donne un espace acoustique doux, pas une vraie salle, juste une "profondeur"
-    silence_court = AudioSegment.silent(duration=80)
+    # Réverbération à 3 couches — délais courts pour rester intime
+    # (une grande salle utiliserait 300ms+, ici on reste à 60/120/200ms)
+    e1 = AudioSegment.silent(duration=60)  + segment - 12  # écho 1 : proche
+    e2 = AudioSegment.silent(duration=120) + segment - 18  # écho 2 : milieu
+    e3 = AudioSegment.silent(duration=200) + segment - 26  # écho 3 : lointain
 
-    echo1 = silence_court + segment - 14
-    echo2 = AudioSegment.silent(duration=160) + segment - 22
-
-    # On superpose les trois couches (original + 2 échos)
-    longueur_totale = max(len(segment), len(echo1), len(echo2))
-    resultat = AudioSegment.silent(duration=longueur_totale)
+    longueur = max(len(segment), len(e1), len(e2), len(e3))
+    resultat = AudioSegment.silent(duration=longueur)
     resultat = resultat.overlay(segment, position=0)
-    resultat = resultat.overlay(echo1, position=0)
-    resultat = resultat.overlay(echo2, position=0)
+    resultat = resultat.overlay(e1, position=0)
+    resultat = resultat.overlay(e2, position=0)
+    resultat = resultat.overlay(e3, position=0)
 
     return resultat
 
