@@ -1,11 +1,9 @@
 """
-Moteur du générateur de dialogues audio — VERSION GRATUITE.
+Moteur du générateur de dialogues audio.
 
-- Écriture du dialogue : Google Gemini API (plan gratuit, sans carte bancaire)
-- Synthèse vocale : edge-tts (voix Microsoft Edge, gratuit et illimité)
-
-Gère : génération IA du script, parsing d'un script manuel,
-attribution des voix par genre, synthèse vocale, fusion audio.
+- Écriture du dialogue : Google Gemini (fallback Groq)
+- Synthèse vocale GRATUIT : edge-tts (Microsoft Edge, illimité)
+- Synthèse vocale PREMIUM : ElevenLabs (qualité cinéma)
 """
 
 import asyncio
@@ -18,31 +16,31 @@ from pathlib import Path
 
 import edge_tts
 import google.generativeai as genai
+import httpx
 from pydub import AudioSegment
 
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 GEMINI_MODEL = "gemini-3.5-flash"
 
-# Groq — fallback automatique quand Gemini atteint son quota (429).
-# Compatible OpenAI, pas de carte bancaire, ~14 000 req/jour gratuits.
-# Si GROQ_API_KEY n'est pas définie, le fallback est désactivé silencieusement.
 _GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = "llama-3.3-70b-versatile"
+
+# ---------------------------------------------------------
+# ELEVENLABS — voix premium
+# ---------------------------------------------------------
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ROGER = "2AGrjHJgmTgUqzy68M9W"   # voix masculine premium
+ELEVENLABS_VOICE_ALINE = "i6ke7jvmGEVUyV4zjSaT"   # voix féminine premium
+ELEVENLABS_MODEL = "eleven_multilingual_v2"
 
 DOSSIER_AUDIO = Path("audio_generes")
 DOSSIER_AUDIO.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------
-# VOIX SIGNATURES — fixes, identité sonore de l'application.
+# VOIX SIGNATURES
 #
-#   ALINE — fr-FR-DeniseNeural
-#     Naturelle, chaleureuse, légèrement intense.
-#
-#   ROGER — fr-FR-RemyMultilingualNeural
-#     Voix conversationnelle moderne, fluide et naturelle.
-#     Bien meilleure que Henri pour la drague et le dialogue intime.
-#     Les réglages "Capitaine Calme" sont adoucis pour coller
-#     à un ton poème/séduction plutôt qu'autoritaire.
+# GRATUIT  → edge-tts (Denise + Remy)
+# PREMIUM  → ElevenLabs (Aline + Roger IDs ci-dessus)
 # ---------------------------------------------------------
 
 VOIX_ALINE = "fr-FR-DeniseNeural"
@@ -385,32 +383,71 @@ def _ton_vers_prosodie(ton: str, genre: str = "neutre") -> tuple[str, str, str]:
 
 
 # ---------------------------------------------------------
-# 5. SYNTHÈSE VOCALE (edge-tts) + FUSION AUDIO
+# 5. SYNTHÈSE VOCALE — GRATUIT (edge-tts) + PREMIUM (ElevenLabs)
 # ---------------------------------------------------------
 
-async def _generer_audio_ligne(texte: str, voix: str, ton: str = "",
-                               genre: str = "neutre") -> AudioSegment:
+async def _synthese_edge_tts(texte: str, voix: str, ton: str,
+                              genre: str) -> AudioSegment:
+    """Synthèse gratuite via edge-tts."""
     rate, volume, pitch = _ton_vers_prosodie(ton, genre)
     communicate = edge_tts.Communicate(texte, voix, rate=rate, volume=volume, pitch=pitch)
-
     audio_bytes = bytearray()
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             audio_bytes.extend(chunk["data"])
+    return AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
 
-    segment = AudioSegment.from_file(io.BytesIO(bytes(audio_bytes)), format="mp3")
-    return segment
+
+async def _synthese_elevenlabs(texte: str, voice_id: str, genre: str) -> AudioSegment:
+    """Synthèse premium via ElevenLabs — qualité cinéma."""
+    # Réglages de stabilité/similarité adaptés au Capitaine Calme
+    stability     = 0.75 if genre == "homme" else 0.60
+    similarity    = 0.85
+    style         = 0.35 if genre == "homme" else 0.25  # légère expressivité
+
+    payload = {
+        "text": texte,
+        "model_id": ELEVENLABS_MODEL,
+        "voice_settings": {
+            "stability": stability,
+            "similarity_boost": similarity,
+            "style": style,
+            "use_speaker_boost": True,
+        },
+    }
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+    }
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+
+    return AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
+
+
+async def _generer_audio_ligne(texte: str, voix_edge: str, ton: str = "",
+                                genre: str = "neutre",
+                                premium: bool = False) -> AudioSegment:
+    if premium and ELEVENLABS_API_KEY:
+        voice_id = ELEVENLABS_VOICE_ROGER if genre == "homme" else ELEVENLABS_VOICE_ALINE
+        return await _synthese_elevenlabs(texte, voice_id, genre)
+    else:
+        return await _synthese_edge_tts(texte, voix_edge, ton, genre)
 
 
 async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
-                                  pause_base_ms: int = 350) -> AudioSegment:
+                                  pause_base_ms: int = 350,
+                                  premium: bool = False) -> AudioSegment:
     audio_final = AudioSegment.empty()
 
     for i, replique in enumerate(dialogue):
         voix = mapping_voix[replique["personnage"]]
         genre = replique.get("genre", "neutre")
         segment = await _generer_audio_ligne(
-            replique["ligne"], voix, replique.get("ton", ""), genre
+            replique["ligne"], voix, replique.get("ton", ""), genre, premium
         )
         audio_final += segment
 
@@ -419,6 +456,17 @@ async def generer_audio_dialogue(dialogue: list[dict], mapping_voix: dict,
             audio_final += AudioSegment.silent(duration=pause_ms)
 
     return audio_final
+
+
+async def exporter_audio(dialogue: list[dict], format_sortie: str = "mp3",
+                          premium: bool = False) -> str:
+    mapping_voix = attribuer_voix(dialogue)
+    audio_final = await generer_audio_dialogue(dialogue, mapping_voix,
+                                                premium=premium)
+    nom_fichier = f"{uuid.uuid4().hex}.{format_sortie}"
+    chemin = DOSSIER_AUDIO / nom_fichier
+    audio_final.export(chemin, format=format_sortie)
+    return nom_fichier
 
 
 async def exporter_audio(dialogue: list[dict], format_sortie: str = "mp3") -> str:
